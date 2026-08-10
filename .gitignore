@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Test/tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Generated output
+plan.md
+
+# Local scratch space
+scratch/
+
+# macOS
+.DS_Store

@@ -1,0 +1,27 @@
+[project]
+name = "localplan"
+version = "0.1.0"
+description = "A local-first day planner where a small language model reads your words and deterministic Python does everything else."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "sanket-cpu", email = "devalarajusanket@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "ollama>=0.6.2",
+    "pydantic>=2.13.4",
+]
+
+[project.scripts]
+localplan = "localplan:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
