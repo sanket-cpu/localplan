@@ -17,7 +17,7 @@ the model. `AddTask` arrives without an id; ``next_id`` stamps one and advances.
 
 from collections.abc import Sequence
 
-from .models import (
+from ..models import (
     AddTask,
     MoveTask,
     Op,
@@ -47,7 +47,11 @@ def apply_ops(
     every other op in the batch still lands.
     """
     tasks = [t.model_copy() for t in state.tasks]
-    next_id = state.next_id
+    # Never trust a counter that has fallen behind the board it belongs to. A
+    # stale next_id (hand-edited or partially restored state.json) would mint an
+    # id that already exists, and _index_of resolves to the first match — so
+    # every later op would silently hit the wrong task.
+    next_id = max(state.next_id, max((t.id for t in tasks), default=0) + 1)
     problems: list[str] = []
 
     for op in ops:
@@ -88,5 +92,11 @@ def apply_ops(
                     tasks[idx] = tasks[idx].model_copy(
                         update={"duration_minutes": op.duration_minutes}
                     )
+
+            case _:
+                # A new Op variant added to models.py without a branch here
+                # would otherwise vanish without a trace, and the CLI would
+                # print the unchanged plan as though the edit had landed.
+                problems.append(f"unsupported operation {type(op).__name__}")
 
     return PlannerState(tasks=tasks, next_id=next_id), problems

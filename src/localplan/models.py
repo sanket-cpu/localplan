@@ -9,7 +9,7 @@ Three families of types:
 * Long-lived state (`Task`, `PlannerState`) — the board the deterministic layer
   owns and mutates. Every `Task` carries a Python-assigned ``id``; the model may
   only reference ids it was shown, never invent them.
-* Scheduler output (`ScheduledBlock`, `Schedule`) — what deterministic Python
+* Scheduler output (`TimeBlock`, `PlanResult`) — what deterministic Python
   produces. Times are real ``datetime.time`` objects. The type change *is* the
   boundary crossing: strings of understanding in, computed clock times out.
 """
@@ -20,6 +20,17 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 Priority = Literal["high", "medium", "low"]
+
+# A 24-hour "HH:MM" clock time. Enforced on every field that carries one, so a
+# malformed time is rejected the moment the model emits it. Without this a
+# `move` to "3pm" validates, persists, and then fails to parse in the scheduler
+# on every subsequent turn — the task silently disappears from the plan, and the
+# user has no way to correct it.
+#
+# Note this is enforced when the response is *validated*, not while it is
+# generated: Ollama's grammar compiler rejects `pattern` outright, so
+# extract._drop_patterns removes it from the schema on the way out.
+HHMM_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
 
 
 class Task(BaseModel):
@@ -38,6 +49,7 @@ class Task(BaseModel):
     )
     fixed_start: str | None = Field(
         default=None,
+        pattern=HHMM_PATTERN,
         description=(
             'Start time as a 24-hour "HH:MM" string if the user pinned one '
             "(e.g. 3pm -> \"15:00\"). Null if the task is flexible."
@@ -66,6 +78,7 @@ class AddTask(BaseModel):
     )
     fixed_start: str | None = Field(
         default=None,
+        pattern=HHMM_PATTERN,
         description='Pinned 24-hour "HH:MM" start, or null if flexible.',
     )
     priority: Priority = Field(default="medium")
@@ -84,7 +97,8 @@ class MoveTask(BaseModel):
     op: Literal["move"] = "move"
     id: int = Field(description="Id of an existing task, taken from the board.")
     fixed_start: str = Field(
-        description='New pinned start as 24-hour "HH:MM" (e.g. 2pm -> "14:00").'
+        pattern=HHMM_PATTERN,
+        description='New pinned start as 24-hour "HH:MM" (e.g. 2pm -> "14:00").',
     )
 
 
@@ -127,7 +141,7 @@ class PlannerState(BaseModel):
     next_id: int = 1
 
 
-class ScheduledBlock(BaseModel):
+class TimeBlock(BaseModel):
     """A task placed on the timeline by the deterministic scheduler."""
 
     name: str
@@ -136,13 +150,13 @@ class ScheduledBlock(BaseModel):
     kind: Literal["fixed", "flexible"]
 
 
-class Schedule(BaseModel):
+class PlanResult(BaseModel):
     """The finished plan plus anything the scheduler could not place.
 
     Failures are carried as data (not raised) so the scheduler stays a pure,
     fully testable function.
     """
 
-    blocks: list[ScheduledBlock] = Field(default_factory=list)
+    blocks: list[TimeBlock] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
     unscheduled: list[str] = Field(default_factory=list)

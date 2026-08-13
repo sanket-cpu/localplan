@@ -1,14 +1,14 @@
 """Export a finished schedule to Markdown — pure, deterministic, zero deps.
 
 Same data as the terminal render, in a portable format. PDF is the stretch goal;
-because this stays a pure ``Schedule -> str`` function, PDF later is just "render
+because this stays a pure ``PlanResult -> str`` function, PDF later is just "render
 the same blocks a different way" and nothing upstream has to change.
 """
 
-from .models import Schedule
+from .models import PlanResult
 
 
-def to_markdown(schedule: Schedule) -> str:
+def to_markdown(schedule: PlanResult) -> str:
     """Render a schedule as a Markdown document."""
     lines = ["# Your day", ""]
 

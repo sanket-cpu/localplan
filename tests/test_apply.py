@@ -7,7 +7,7 @@ Fork B was chosen over Fork A is that this logic is reachable by a unit test at
 all.
 """
 
-from localplan.apply import apply_ops
+from localplan.planner.apply import apply_ops
 from localplan.models import (
     AddTask,
     MoveTask,
@@ -100,3 +100,29 @@ def test_batch_of_ops_applies_in_order_and_partial_failures_still_land():
     assert [t.name for t in state.tasks] == ["Dentist"]
     assert state.tasks[0].fixed_start == "16:00"
     assert problems == ["no task with id 99 to reschedule"]
+
+
+def test_stale_next_id_is_reconciled_against_the_board():
+    # A hand-edited or partially restored state.json can carry a counter that
+    # has fallen behind its own board. Minting from it would duplicate an id,
+    # and _index_of resolves to the first match — so a later `remove` would
+    # delete the wrong task.
+    start = PlannerState(tasks=[Task(id=5, name="Gym", duration_minutes=60)], next_id=1)
+    state, problems = apply_ops(start, [AddTask(name="Report", duration_minutes=30)])
+    assert problems == []
+    ids = [t.id for t in state.tasks]
+    assert len(set(ids)) == len(ids), f"duplicate ids minted: {ids}"
+    assert state.tasks[-1].id == 6
+
+
+def test_unsupported_op_is_reported_not_silently_dropped():
+    # Guards the match statement's fallback: a new Op variant added to models.py
+    # without a branch in apply_ops would otherwise vanish, and the CLI would
+    # print the unchanged plan as though the edit had landed.
+    class SetPriority:
+        pass
+
+    start = PlannerState(tasks=[Task(id=1, name="Gym", duration_minutes=60)], next_id=2)
+    state, problems = apply_ops(start, [SetPriority()])
+    assert [t.name for t in state.tasks] == ["Gym"]
+    assert problems == ["unsupported operation SetPriority"]

@@ -8,12 +8,14 @@ here; the model never touches anything in this file.
 
 from datetime import time
 
-from .models import Schedule, ScheduledBlock, Task
+from ..models import PlanResult, TimeBlock, Task
 
 # The only configuration Milestone 1 has. Promote to a config module the day
 # there is actually something to configure.
 WORK_START = time(9, 0)
 WORK_END = time(17, 0)
+
+MINUTES_PER_DAY = 24 * 60
 
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -24,8 +26,14 @@ def _to_minutes(t: time) -> int:
 
 
 def _to_time(minutes: int) -> time:
-    """Inverse of :func:`_to_minutes`."""
-    return time(minutes // 60, minutes % 60)
+    """Inverse of :func:`_to_minutes`.
+
+    ``1440`` — midnight closing the day — wraps to ``00:00``, so a task ending
+    exactly on the boundary renders as "23:30-00:00". Anything beyond that is
+    refused before it reaches here (:func:`build_schedule`), because ``time``
+    cannot represent an hour >= 24 and would raise.
+    """
+    return time(minutes // 60 % 24, minutes % 60)
 
 
 def _parse_hhmm(value: str) -> time | None:
@@ -37,14 +45,14 @@ def _parse_hhmm(value: str) -> time | None:
         return None
 
 
-def build_schedule(tasks: list[Task]) -> Schedule:
+def build_schedule(tasks: list[Task]) -> PlanResult:
     """Turn understood tasks into a concrete, time-blocked schedule.
 
     Pure function: same tasks in, same schedule out. Overlapping fixed tasks are
     refused and reported (not auto-resolved); flexible tasks that do not fit the
     remaining gaps are reported as unscheduled.
     """
-    schedule = Schedule()
+    schedule = PlanResult()
 
     fixed_tasks = [t for t in tasks if t.fixed_start is not None]
     flexible_tasks = [t for t in tasks if t.fixed_start is None]
@@ -60,24 +68,41 @@ def build_schedule(tasks: list[Task]) -> Schedule:
             continue
         start_min = _to_minutes(start)
         end_min = start_min + task.duration_minutes
+        if end_min > MINUTES_PER_DAY or task.duration_minutes >= MINUTES_PER_DAY:
+            # A single-day planner has nowhere to put the overflow, and the
+            # clock types cannot express it. Refuse and report, like any other
+            # failure here — never let it reach _to_time, which would raise.
+            # The duration bound also rejects the degenerate full-day task,
+            # which would otherwise render as a meaningless "00:00-00:00".
+            schedule.conflicts.append(
+                f"{task.name}: {task.duration_minutes} min from "
+                f"{start:%H:%M} does not fit in the day"
+            )
+            continue
         placed_fixed.append((start_min, end_min, task.name))
 
     placed_fixed.sort()
 
-    # Detect overlaps between adjacent fixed tasks -> refuse and report.
-    for (a_start, a_end, a_name), (b_start, b_end, b_name) in zip(
-        placed_fixed, placed_fixed[1:]
-    ):
-        if b_start < a_end:
+    # Detect overlaps -> refuse and report. Each task is compared against the
+    # furthest-reaching task so far, not merely its predecessor: one long
+    # appointment can swallow several later ones, and an adjacent-pairs-only
+    # check would report just the first and leave the rest double-booked.
+    covering: tuple[int, int, str] | None = None
+    for block in placed_fixed:
+        start_min, end_min, name = block
+        if covering is not None and start_min < covering[1]:
+            c_start, c_end, c_name = covering
             schedule.conflicts.append(
-                f'"{a_name}" ({_to_time(a_start):%H:%M}-{_to_time(a_end):%H:%M}) '
-                f'overlaps "{b_name}" '
-                f"({_to_time(b_start):%H:%M}-{_to_time(b_end):%H:%M})"
+                f'"{c_name}" ({_to_time(c_start):%H:%M}-{_to_time(c_end):%H:%M}) '
+                f'overlaps "{name}" '
+                f"({_to_time(start_min):%H:%M}-{_to_time(end_min):%H:%M})"
             )
+        if covering is None or end_min > covering[1]:
+            covering = block
 
     for start_min, end_min, name in placed_fixed:
         schedule.blocks.append(
-            ScheduledBlock(
+            TimeBlock(
                 name=name,
                 start=_to_time(start_min),
                 end=_to_time(end_min),
@@ -113,7 +138,7 @@ def build_schedule(tasks: list[Task]) -> Schedule:
                 start_min = gap[0]
                 end_min = start_min + task.duration_minutes
                 schedule.blocks.append(
-                    ScheduledBlock(
+                    TimeBlock(
                         name=task.name,
                         start=_to_time(start_min),
                         end=_to_time(end_min),

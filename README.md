@@ -15,7 +15,7 @@ decides what those operations actually do.
 ## Demo
 
 ```
-$ localplan
+$ localplan plan
 Localplan — describe your day, then refine it turn by turn.
 Commands: 'clear' resets, 'export' writes plan.md, empty line or 'quit' exits.
 
@@ -59,7 +59,7 @@ Requires [Ollama](https://ollama.com) and [uv](https://docs.astral.sh/uv/).
 ```bash
 ollama pull qwen3.5:9b
 git clone https://github.com/sanket-cpu/localplan && cd localplan
-uv run localplan
+uv run localplan plan
 ```
 
 That's the whole setup. Nothing to sign up for.
@@ -83,9 +83,9 @@ Every turn does the same four things:
 
 1. **Understand** — [`extract.py`](src/localplan/extract.py) sends the current
    board plus the user's line to the model, and gets back edit ops.
-2. **Apply** — [`apply.py`](src/localplan/apply.py) mutates the board. This is
-   the only place mutation happens.
-3. **Schedule** — [`scheduler.py`](src/localplan/scheduler.py) recomputes the
+2. **Apply** — [`apply.py`](src/localplan/planner/apply.py) mutates the board.
+   This is the only place mutation happens.
+3. **Schedule** — [`scheduler.py`](src/localplan/planner/scheduler.py) recomputes the
    whole timeline from the tasks.
 4. **Persist** — [`store.py`](src/localplan/store.py) writes the board to disk so
    the conversation survives restarts.
@@ -154,21 +154,24 @@ while validation still uses the real Pydantic types.
 uv run pytest
 ```
 
-12 tests, no model calls, runs in well under a second. The deterministic layer is
+52 tests, no model calls, runs in well under a second. The deterministic layer is
 fully reachable by unit tests by design.
 
 ## Status and roadmap
 
 Working today: multi-turn conversational editing, deterministic scheduling with
-conflict reporting, persistence across restarts, Markdown export.
+conflict reporting, persistence across restarts, Markdown export. A failed turn
+— dead Ollama daemon, unparseable reply, read-only disk — costs the turn, never
+the session or the saved board.
 
 Deliberately not done yet, in order:
 
 - [ ] **Evaluation set** — `(board, utterance) → expected ops` cases, scored by
       op exact-match and board-equivalence. `apply_ops` is a deterministic
       verifier, so correctness is measurable without a human or an LLM judge.
-- [ ] **Boundary hardening** — schema-validation failures and Ollama connection
-      errors currently propagate out of the REPL. Needs a retry/repair path.
+- [ ] **Automatic repair** — a turn that fails schema validation is currently
+      reported and dropped. It should be retried with the validation error fed
+      back to the model, and the repair rate tracked as a metric.
 - [ ] **Observability** — TTFT, end-to-end p50/p95, token counts, and a failure
       taxonomy at the AI boundary, gated in CI.
 - [ ] **Model comparison** — the model is currently hardcoded. Make it config,

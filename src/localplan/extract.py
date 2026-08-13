@@ -95,8 +95,32 @@ def _require_all(schema: object) -> object:
     return schema
 
 
-# Built once: the hardened schema Ollama is constrained to (see _require_all).
-_OPS_SCHEMA = _require_all(OpList.model_json_schema())
+def _drop_patterns(schema: object) -> object:
+    """Recursively strip ``pattern`` constraints from a JSON schema.
+
+    Ollama compiles the schema into a sampling grammar, and that compiler has no
+    regex support: a single ``pattern`` anywhere fails the entire request with
+    ``failed to parse grammar`` (HTTP 400). The constraint is not lost — it is
+    still enforced Python-side when the response is validated against the real
+    Pydantic types — it just cannot be enforced *during* generation, so a
+    malformed time surfaces as a rejected turn instead of an impossible one.
+
+    Same lesson as :func:`_require_all`: the schema Pydantic emits and the schema
+    Ollama can compile are not the same document.
+    """
+    if isinstance(schema, dict):
+        schema.pop("pattern", None)
+        for value in schema.values():
+            _drop_patterns(value)
+    elif isinstance(schema, list):
+        for item in schema:
+            _drop_patterns(item)
+    return schema
+
+
+# Built once: the hardened schema Ollama is constrained to. Both transforms are
+# about what the grammar compiler can accept, not about what the data means.
+_OPS_SCHEMA = _drop_patterns(_require_all(OpList.model_json_schema()))
 
 
 def produce_ops(
